@@ -30,6 +30,24 @@ export const fmtDateTimeBR = (iso: string) => {
   }
 }
 
+export const msDay = 86_400_000
+
+export const fmtDateBRMs = (ms: number) => {
+  try {
+    return format(new Date(ms), 'dd/MM/yyyy', { locale: ptBR })
+  } catch {
+    return ''
+  }
+}
+
+export const fmtDateTimeBRMs = (ms: number) => {
+  try {
+    return format(new Date(ms), "dd/MM 'às' HH:mm", { locale: ptBR })
+  } catch {
+    return ''
+  }
+}
+
 export const normalizePhone = (raw: string) => {
   let digits = raw.replace(/\D/g, '').replace(/^0+/, '')
   if (digits && !digits.startsWith('55') && (digits.length === 10 || digits.length === 11)) {
