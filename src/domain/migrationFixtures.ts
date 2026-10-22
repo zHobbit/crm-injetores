@@ -1,0 +1,161 @@
+import type { DealV1 } from './types'
+
+/**
+ * Fixture da migração v1→v2: cópia literal dos 10 negócios do seed v1
+ * (`src/store/seed.ts` @ commit e6304ff), com as datas congeladas na
+ * referência 2026-10-22T12:00:00Z — mesmo resultado de rodar os helpers
+ * dinâmicos `ts(n)`/`iso(n)` do seed antigo nesse instante
+ * (é o `now` usado por `migration.test.ts`).
+ * Conteúdo de negócio (nomes, telefones, notes, activityLog) preservado verbatim.
+ */
+const REF_MS = Date.parse('2026-10-22T12:00:00Z')
+const DAY_MS = 86_400_000
+const ts = (daysAgo: number) => new Date(REF_MS - daysAgo * DAY_MS).toISOString()
+const iso = (daysAgo: number) => ts(daysAgo).slice(0, 10)
+
+let seq = 0
+const base = (stage: DealV1['stage'], order: number) => ({
+  id: `seed-${++seq}`,
+  stage,
+  order,
+  closedAt: null as string | null,
+  notes: '',
+  activityLog: [] as DealV1['activityLog'],
+  createdAt: ts(30),
+  updatedAt: ts(2),
+})
+
+export const SEED_DEALS_V1: DealV1[] = [
+  {
+    ...base('triage', 0),
+    customerName: 'Diesel Bomar Ltda',
+    phone: '5581999881122',
+    profile: 'bombista',
+    partCode: '0445110376',
+    application: 'Injetor Amarok 2.0 TDI',
+    brand: 'Bosch',
+    valueBRL: 320000,
+    lastContactAt: iso(2),
+    notes: 'Pediu 4 unidades com bicos novos. Cobrar posição do orçamento.',
+    activityLog: [{ at: ts(2), type: 'created', text: 'Contato criado via WhatsApp' }],
+  },
+  {
+    ...base('triage', 1),
+    customerName: 'Garagem do Zé',
+    phone: '5581988772211',
+    profile: 'mecanico',
+    partCode: '2822010216',
+    application: 'Bomba CPA1 — Cummins 6BT',
+    brand: 'Delphi',
+    valueBRL: 450000,
+    lastContactAt: iso(9),
+    notes: 'Bomba com retorno vazando; quer teste antes de comprar.',
+    activityLog: [{ at: ts(9), type: 'contact', text: 'Enviado vídeo do teste de bancada' }],
+  },
+  {
+    ...base('triage', 2),
+    customerName: 'Vale Transporte ME',
+    phone: '5511977661234',
+    profile: 'cliente_final',
+    partCode: '0414723073',
+    application: 'Bomba Hilux 3.0 D4D',
+    brand: 'Denso',
+    valueBRL: 120000,
+    lastContactAt: iso(21),
+    notes: 'Frota parada — prioridade alta, Cliente sumiu após orçamento.',
+    activityLog: [],
+  },
+  {
+    ...base('quote', 0),
+    customerName: 'Injetec Peças',
+    phone: '554133221100',
+    profile: 'revendedor',
+    partCode: '0445120247',
+    application: 'Injetor Ranger 3.2 PUMA',
+    brand: 'Bosch',
+    valueBRL: 780000,
+    lastContactAt: iso(1),
+    notes: 'Cotação para 6 pcs + tabela de revenda mensal.',
+    activityLog: [{ at: ts(1), type: 'contact', text: 'Proposta comercial enviada por WhatsApp' }],
+  },
+  {
+    ...base('quote', 1),
+    customerName: 'Auto Diesel Sul',
+    phone: '5551991234567',
+    profile: 'bombista',
+    partCode: 'CP19 8-97151-021',
+    application: 'Bomba Civic D15 — recondicionada',
+    brand: 'Bosch',
+    valueBRL: 450000,
+    lastContactAt: iso(12),
+    notes: 'Aguardando confirmação de usinagem do corpo.',
+    activityLog: [],
+  },
+  {
+    ...base('waiting', 0),
+    customerName: 'Fazenda Santa Luzia',
+    phone: '5564996543210',
+    profile: 'cliente_final',
+    partCode: '0950006543',
+    application: 'Retificador EPB — MF 4.297',
+    brand: 'Bosch',
+    valueBRL: 295000,
+    lastContactAt: iso(30),
+    notes: 'Decide após safra. Sem resposta há 1 mês — reativar.',
+    activityLog: [],
+  },
+  {
+    ...base('negotiation', 0),
+    customerName: 'Bombas & Diesel SP',
+    phone: '5511944556677',
+    profile: 'bombista',
+    partCode: 'L1091310',
+    application: 'Bico injetor S10 4.3 — 6 un',
+    brand: 'Delphi',
+    valueBRL: 640000,
+    lastContactAt: iso(3),
+    notes: 'Negociando pagamento 30/60 + frete por conta.',
+    activityLog: [{ at: ts(3), type: 'contact', text: 'Ligação: pediu 5% de desconto no fechamento' }],
+  },
+  {
+    ...base('won', 0),
+    customerName: 'Transportes Ribeiro',
+    phone: '5571993217654',
+    profile: 'revendedor',
+    partCode: '0445110521',
+    application: 'Kit injetores Amarok (4x)',
+    brand: 'Bosch',
+    valueBRL: 990000,
+    lastContactAt: iso(5),
+    closedAt: iso(5),
+    notes: 'Fechado com Nota. Enviar certificado de teste.',
+    activityLog: [{ at: ts(5), type: 'stage', text: 'Venda concluída' }],
+  },
+  {
+    ...base('postsale', 0),
+    customerName: 'Frotamax Log',
+    phone: '5585998701122',
+    profile: 'revendedor',
+    partCode: '2822010741',
+    application: '6 bombas CPA — Sprinter OM611',
+    brand: 'Continental',
+    valueBRL: 2700000,
+    lastContactAt: iso(4),
+    closedAt: iso(18),
+    notes: 'Rastrear NF-e 44812; 2 bombas com retorno antecipado.',
+    activityLog: [{ at: ts(4), type: 'contact', text: 'Cliente confirmou recebimento' }],
+  },
+  {
+    ...base('warranty', 0),
+    customerName: 'Diego InJETores',
+    phone: '5547992334455',
+    profile: 'bombista',
+    partCode: '0445110353',
+    application: 'Injetor Golf TDI — garantia',
+    brand: 'Bosch',
+    valueBRL: 78000,
+    lastContactAt: iso(8),
+    notes: 'Retorno: falha de partida a frio. Análise técnica em bancada.',
+    activityLog: [{ at: ts(8), type: 'note', text: 'Peça recebida, protocolo GT-1042' }],
+  },
+]
