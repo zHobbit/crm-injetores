@@ -1,0 +1,4 @@
+node_modules/
+dist/
+rea-evidence/kommo-scripts/
+*.log

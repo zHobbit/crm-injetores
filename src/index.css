@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --bg: #f2ede3;
+  --bg-deep: #e9e2d4;
+  --surface: #fffdf7;
+  --surface-2: #ece5d7;
+  --line: #d8cdb8;
+  --line-soft: #e3dac7;
+  --ink: #211b10;
+  --ink-2: #6d6352;
+  --accent: #b45309;
+  --accent-soft: #f59e0b1a;
+  --shadow: 0 1px 2px rgb(33 27 16 / 0.06), 0 4px 12px rgb(33 27 16 / 0.06);
+  --col-head: #e6dec9;
+}
+
+.dark {
+  --bg: #161310;
+  --bg-deep: #100e0b;
+  --surface: #201c17;
+  --surface-2: #2a251e;
+  --line: #3b342a;
+  --line-soft: #302a22;
+  --ink: #ece4d3;
+  --ink-2: #9c917d;
+  --accent: #f5a623;
+  --accent-soft: #f5a6231f;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 18px rgb(0 0 0 / 0.35);
+  --col-head: #26211a;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-deep: var(--bg-deep);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --font-sans: "Sora", ui-sans-serif, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* subtle workshop atmosphere: warm radial glow + faint grain */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(1200px 500px at 85% -10%, var(--accent-soft), transparent 65%),
+    radial-gradient(900px 420px at -10% 110%, var(--accent-soft), transparent 60%);
+}
+
+::-webkit-scrollbar { height: 10px; width: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 99px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-2); }
+
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.card-in { animation: card-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes drawer-in {
+  from { transform: translateX(28px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.drawer-in { animation: drawer-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+.fade-in { animation: fade-in 0.2s ease both; }
+
+@keyframes pulse-red {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(239 68 68 / 0.45); }
+  50% { box-shadow: 0 0 0 5px rgb(239 68 68 / 0); }
+}
+.pulse-red { animation: pulse-red 2.2s ease-in-out infinite; }
+
+.deal-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.deal-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.deal-card:active {
+  cursor: grabbing;
+}
+
+/* touch devices: sempre mostrar ações rápidas do card */
+@media (hover: none) {
+  .card-actions { opacity: 1 !important; }
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.45);
+}
+.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
