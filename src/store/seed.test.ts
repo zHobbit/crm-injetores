@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { seedCrmData } from './seed'
-import { stageTypeMeta } from '../domain/types'
 
 describe('seedCrmData', () => {
   const data = seedCrmData()
@@ -9,7 +8,9 @@ describe('seedCrmData', () => {
     expect(pipe.isMain).toBe(true)
     expect(Object.keys(data.stages)).toHaveLength(7)
     expect(data.stages['triage'].name).toContain('Triagem')
-    expect(stageTypeMeta(data.stages['won'].type).kind).toBe('won')
+    expect(data.stages['won'].kind).toBe('won')
+    expect(data.stages['triage'].kind).toBe('open')
+    expect(data.stages['warranty'].kind).toBe('open')
     expect(data.stages['warranty'].emoji).toBe('🛡️')
   })
   it('campos customizados migram os campos fixos atuais', () => {
@@ -21,6 +22,14 @@ describe('seedCrmData', () => {
     expect(byCode['part_code'].kind).toBe('text')
     expect(byCode['application'].kind).toBe('text')
     expect(byCode['notes'].kind).toBe('textarea')
+    expect(Object.values(data.customFields).every((f) => Array.isArray(f.requiredInStageIds) && f.requiredInStageIds.length === 0)).toBe(true)
+  })
+  it('automações usam slugs de task do Addendum A4 (acompanhar nativo, sem followup)', () => {
+    const kindTags = data.automations.flatMap((r) =>
+      r.actions.flatMap((a) => (a.kind === 'create_task' ? [a.kindTag] : [])),
+    )
+    expect(kindTags).toContain('acompanhar')
+    expect(kindTags).not.toContain('followup')
   })
   it('10 deals, 10 contatos, atividades com author', () => {
     expect(Object.keys(data.deals)).toHaveLength(10)

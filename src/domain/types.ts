@@ -4,6 +4,9 @@
 //   - Deal.unsorted obrigatório (default false)
 //   - Stage.emoji (extensão local: preserva os emojis do seed atual)
 //   - Contact.custom (perfil vive em custom['profile'], campo scope contact)
+//   - Stage.kind: ganho/perda derivados da etapa (open | won | lost)
+//   - CustomField.requiredInStageIds: obrigatoriedade do campo por etapa (lista de ids)
+//   - Task.result: texto livre registrado ao concluir a tarefa
 // 1 usuário: createdBy/updatedBy = 'me'; authorName = 'me'.
 
 // ---------- tipos primitivos de metadado ----------
@@ -31,19 +34,9 @@ export interface Stage {
   name: string
   color: string
   sort: number
-  type: number // 1=normal, 2=ganho, 3=perda
+  kind: 'open' | 'won' | 'lost' // ganho/perda derivados da etapa
   editable: boolean
   emoji: string // preserva os emojis do seed atual
-}
-
-/** Semântica de Stage.type: 1=normal, 2=ganho, 3=perda (rótulos pt-BR). */
-export function stageTypeMeta(t: number): { kind: 'normal' | 'won' | 'loss'; label: string } {
-  const meta: Record<number, { kind: 'normal' | 'won' | 'loss'; label: string }> = {
-    1: { kind: 'normal', label: 'Normal' },
-    2: { kind: 'won', label: 'Ganho' },
-    3: { kind: 'loss', label: 'Perda' },
-  }
-  return meta[t] ?? meta[1]
 }
 
 // ---------- CustomField (metadado rico) ----------
@@ -55,7 +48,7 @@ export interface CustomField {
   scopes: EntityScope[] // em quais entidades aparece
   sort: number
   multiple: boolean
-  required: boolean
+  requiredInStageIds: string[] // ids das etapas em que o campo é obrigatório
   visible: boolean
   filterable: boolean
   sortable: boolean
@@ -124,9 +117,10 @@ export interface Task {
   id: string
   dealId: string | null
   text: string
-  kind: string // ex.: 'followup','cotacao','posvenda','garantia'
+  kind: string // 'acompanhar' | 'reuniao' | 'cotacao' | 'posvenda' | 'garantia' | 'outro'
   dueAt: number | null // ms epoch
   completed: boolean
+  result?: string // texto livre na conclusão
   createdAt: number // ms epoch
   updatedAt: number // ms epoch
 }

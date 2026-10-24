@@ -184,15 +184,15 @@ const pipelines: Record<string, Pipeline> = {
   },
 }
 
-// Espelho do STAGES v1 (id, label, accent, emoji) — type: won → 2 (ganho), demais → 1.
-const STAGE_SEED: { id: string; name: string; color: string; emoji: string; type: number }[] = [
-  { id: 'triage', name: 'Triagem / Novo Contato', color: '#94a3b8', emoji: '📥', type: 1 },
-  { id: 'quote', name: 'Cotação Enviada', color: '#38bdf8', emoji: '📋', type: 1 },
-  { id: 'waiting', name: 'Aguardando Resposta', color: '#fbbf24', emoji: '⏳', type: 1 },
-  { id: 'negotiation', name: 'Em Negociação', color: '#fb923c', emoji: '🤝', type: 1 },
-  { id: 'won', name: 'Venda Concluída', color: '#4ade80', emoji: '✅', type: 2 },
-  { id: 'postsale', name: 'Pós-Venda & Rastreio', color: '#2dd4bf', emoji: '🚚', type: 1 },
-  { id: 'warranty', name: 'Garantia / Análise Técnica', color: '#a78bfa', emoji: '🛡️', type: 1 },
+// Espelho do STAGES v1 (id, label, accent, emoji) — Addendum A1: won → 'won', demais 'open'.
+const STAGE_SEED: { id: string; name: string; color: string; emoji: string; kind: Stage['kind'] }[] = [
+  { id: 'triage', name: 'Triagem / Novo Contato', color: '#94a3b8', emoji: '📥', kind: 'open' },
+  { id: 'quote', name: 'Cotação Enviada', color: '#38bdf8', emoji: '📋', kind: 'open' },
+  { id: 'waiting', name: 'Aguardando Resposta', color: '#fbbf24', emoji: '⏳', kind: 'open' },
+  { id: 'negotiation', name: 'Em Negociação', color: '#fb923c', emoji: '🤝', kind: 'open' },
+  { id: 'won', name: 'Venda Concluída', color: '#4ade80', emoji: '✅', kind: 'won' },
+  { id: 'postsale', name: 'Pós-Venda & Rastreio', color: '#2dd4bf', emoji: '🚚', kind: 'open' },
+  { id: 'warranty', name: 'Garantia / Análise Técnica', color: '#a78bfa', emoji: '🛡️', kind: 'open' },
 ]
 
 const stages: Record<string, Stage> = Object.fromEntries(
@@ -207,7 +207,7 @@ const enumOf = (fieldId: string, values: string[]): CustomField['enums'] =>
 
 const FIELD_DEFAULTS = {
   multiple: false,
-  required: false,
+  requiredInStageIds: [] as string[],
   visible: true,
   filterable: true,
   sortable: true,
@@ -303,7 +303,7 @@ export const SEED_AUTOMATIONS: AutomationRule[] = [
     trigger: { kind: 'stage_changed', toStageId: 'quote' },
     conditions: { logic: 'and', items: [] },
     actions: [
-      { kind: 'create_task', text: 'cobrar cotação', kindTag: 'followup', inDays: 3 },
+      { kind: 'create_task', text: 'cobrar cotação', kindTag: 'acompanhar', inDays: 3 },
       { kind: 'add_tag', tag: 'aguardando' },
     ],
     lastFiredAt: {},
@@ -345,7 +345,7 @@ export const SEED_AUTOMATIONS: AutomationRule[] = [
       ],
     },
     actions: [
-      { kind: 'create_task', text: 'reativar / encerrar', kindTag: 'followup', inDays: 0 },
+      { kind: 'create_task', text: 'reativar / encerrar', kindTag: 'acompanhar', inDays: 0 },
       // spec: "+ field_changed de decisão" — Action não tem kind 'field_changed';
       // aproximação declarativa: nota registrando a decisão pendente.
       { kind: 'add_note', text: 'Sem contato há 15+ dias — decidir: reativar ou encerrar.' },

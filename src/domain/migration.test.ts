@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { dealsV1ToCrmDataV2, isV1State } from './migration'
-import type { DealV1 } from './types'
 import { SEED_DEALS_V1 } from './migrationFixtures'
 
 describe('dealsV1ToCrmDataV2', () => {
@@ -33,6 +32,11 @@ describe('dealsV1ToCrmDataV2', () => {
     const won = data.deals['seed-8']
     expect(won.closedAt).toBe(Date.parse('2026-10-17'))  // atualizar p/ valor real do fixture
     expect(won.stageId).toBe('won')
+  })
+  it('chassi migrado expõe o schema do Addendum (Stage.kind, requiredInStageIds)', () => {
+    expect(data.stages['won'].kind).toBe('won')
+    expect(data.stages['triage'].kind).toBe('open')
+    expect(Object.values(data.customFields).every((f) => Array.isArray(f.requiredInStageIds))).toBe(true)
   })
   it('ids estáveis e sem colisão (deal, contato, atividade)', () => {
     expect(Object.keys(data.contacts)).toHaveLength(10)
