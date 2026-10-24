@@ -11,7 +11,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
-import { lastContactMsOf, useCrmStore } from './store/useCrmStore'
+import { lastContactMsOf, useAutomationTick, useCrmStore } from './store/useCrmStore'
 import { useUiStore } from './store/useUiStore'
 import { normalizePhone } from './domain/format'
 import { recencyOfMs } from './domain/recency'
@@ -34,6 +34,8 @@ export default function App() {
   const recencyFilter = useUiStore((s) => s.recencyFilter)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeDeal, setActiveDeal] = useState<Deal | null>(null)
+
+  useAutomationTick() // regras de tempo: ao abrir, de hora em hora e ao voltar para a aba
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')

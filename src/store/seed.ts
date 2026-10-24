@@ -309,6 +309,7 @@ export const SEED_AUTOMATIONS: AutomationRule[] = [
       { kind: 'create_task', text: 'cobrar cotação', kindTag: 'acompanhar', inDays: 3 },
       { kind: 'add_tag', tag: 'aguardando' },
     ],
+    cooldown: 86400, // ir e voltar de "Cotação" no mesmo dia não duplica a cobrança
     lastFiredAt: {},
   },
   {
@@ -385,6 +386,31 @@ export const SEED_AUTOMATIONS: AutomationRule[] = [
     lastFiredAt: {},
   },
 ]
+
+// ---------- atualização de regras do seed salvas por versões anteriores ----------
+// Só toca regras ainda no formato original (gatilho/condições/ações iguais aos da versão
+// antiga): regra editada pelo usuário nunca é sobrescrita.
+const ruleBody = (r: Pick<AutomationRule, 'trigger' | 'conditions' | 'actions'>) =>
+  JSON.stringify({ trigger: r.trigger, conditions: r.conditions, actions: r.actions })
+
+const SEED_BY_ID = new Map(SEED_AUTOMATIONS.map((r) => [r.id, r]))
+
+export function upgradeSeedAutomations(rules: AutomationRule[]): AutomationRule[] {
+  return rules.map((r) => {
+    const seed = SEED_BY_ID.get(r.id)
+    if (!seed) return r
+    // 0.2.0 → 0.3.0: auto-6 sem filtro de tag disparava a cada tag nova
+    if (r.id === 'auto-6' && r.trigger.kind === 'tag_changed' && r.trigger.tag === undefined && seed.trigger.kind === 'tag_changed') {
+      const { tag: _tag, ...withoutTag } = seed.trigger
+      if (ruleBody(r) === ruleBody({ ...seed, trigger: withoutTag })) return { ...r, trigger: seed.trigger }
+    }
+    // 0.3.0 → 0.4.0: auto-2 ganhou cooldown de 1 dia
+    if (r.id === 'auto-2' && r.cooldown === undefined && ruleBody(r) === ruleBody(seed)) {
+      return { ...r, cooldown: seed.cooldown }
+    }
+    return r
+  })
+}
 
 // ---------- mapeamento v1 → v2 ----------
 const ACTIVITY_TYPE_MAP: Record<DealV1['activityLog'][number]['type'], Activity['type']> = {
