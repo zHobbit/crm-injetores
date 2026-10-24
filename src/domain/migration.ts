@@ -1,5 +1,6 @@
 import { normalizePhone } from './format'
-import { seedCrmData } from '../store/seed'
+import { isProfile } from './profile'
+import { lastContactActivityV1, seedCrmData } from '../store/seed'
 import type { Activity, Contact, CrmData, Deal, DealV1 } from './types'
 
 /**
@@ -81,6 +82,8 @@ export function dealsV1ToCrmDataV2(v1Deals: DealV1[], nowMs: number): CrmData {
       }
       activities[act.id] = act
     })
+    const lc = lastContactActivityV1(v1)
+    if (lc) activities[lc.id] = lc
   }
 
   return {
@@ -101,4 +104,43 @@ export function isV1State(s: unknown): s is { deals: DealV1[] } {
   const first = maybe.deals[0] as { stage?: unknown; activityLog?: unknown } | undefined
   if (typeof first !== 'object' || first === null) return false
   return typeof first.stage === 'string' && Array.isArray(first.activityLog)
+}
+
+/**
+ * Normaliza um array cru do estado v1: aceita qualquer item com `id`/`stage`
+ * string e preenche campos ausentes com defaults seguros, em vez de descartar
+ * o lote inteiro quando só um item está incompleto (isV1State olha só o 1º).
+ */
+export function coerceV1Deals(raw: unknown[]): DealV1[] {
+  const s = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback)
+  const out: DealV1[] = []
+  raw.forEach((item, i) => {
+    if (typeof item !== 'object' || item === null) return
+    const d = item as Partial<Record<keyof DealV1, unknown>>
+    if (typeof d.id !== 'string' || typeof d.stage !== 'string') return
+    const created = s(d.createdAt, new Date().toISOString())
+    out.push({
+      id: d.id,
+      stage: d.stage,
+      order: typeof d.order === 'number' ? d.order : i,
+      customerName: s(d.customerName, 'Sem nome'),
+      phone: s(d.phone),
+      profile: isProfile(d.profile) ? d.profile : 'cliente_final',
+      partCode: s(d.partCode),
+      application: s(d.application),
+      brand: s(d.brand),
+      valueBRL: typeof d.valueBRL === 'number' ? d.valueBRL : 0,
+      lastContactAt: s(d.lastContactAt, created.slice(0, 10)),
+      closedAt: typeof d.closedAt === 'string' ? d.closedAt : null,
+      notes: s(d.notes),
+      activityLog: Array.isArray(d.activityLog)
+        ? (d.activityLog as Partial<DealV1['activityLog'][number]>[])
+            .filter((a) => a && typeof a.at === 'string' && typeof a.type === 'string' && a.type in ACTIVITY_TYPE_MAP)
+            .map((a) => ({ at: a.at!, type: a.type!, text: s(a.text) }))
+        : [],
+      createdAt: created,
+      updatedAt: s(d.updatedAt, created),
+    })
+  })
+  return out
 }

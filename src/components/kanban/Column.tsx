@@ -1,7 +1,7 @@
 import { useDroppable } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { fmtBRL } from '../../domain/format'
-import type { Deal, StageMeta } from '../../domain/types'
+import type { Deal, Stage } from '../../domain/types'
 import DealCard from './DealCard'
 
 export default function Column({
@@ -9,12 +9,12 @@ export default function Column({
   deals,
   index,
 }: {
-  stage: StageMeta
+  stage: Stage
   deals: Deal[]
   index: number
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id })
-  const total = deals.reduce((a, d) => a + d.valueBRL, 0)
+  const total = deals.reduce((a, d) => a + d.priceCents, 0)
 
   return (
     <section
@@ -23,7 +23,7 @@ export default function Column({
         isOver ? 'border-accent/60 bg-accent/5' : 'border-line bg-surface/60'
       }`}
       style={{ animationDelay: `${index * 45}ms` }}
-      aria-label={`Etapa ${stage.label}`}
+      aria-label={`Etapa ${stage.name}`}
     >
       <header
         className="flex items-center justify-between gap-2 rounded-t-xl border-b border-line-soft px-3 py-2.5"
@@ -32,10 +32,10 @@ export default function Column({
         <div className="flex min-w-0 items-center gap-2">
           <span
             className="h-2 w-2 flex-shrink-0 rounded-full"
-            style={{ background: stage.accent }}
+            style={{ background: stage.color }}
           />
           <span className="truncate text-[12.5px] font-bold tracking-tight">
-            {stage.emoji} {stage.label}
+            {stage.emoji} {stage.name}
           </span>
           <span className="rounded-full bg-ink/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-ink-2">
             {deals.length}

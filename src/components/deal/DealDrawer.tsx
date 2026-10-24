@@ -1,21 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ArrowRightLeft,
-  CalendarCheck1,
+  CalendarCheck,
+  CheckSquare,
   MessageCircle,
   Phone,
   Plus,
   Save,
   StickyNote,
+  Tag,
   Trash2,
   X,
 } from 'lucide-react'
-import { useCrmStore } from '../../store/useCrmStore'
+import { pipelineStages, useCrmStore, useDealView, type DealInput2 } from '../../store/useCrmStore'
 import { useUiStore } from '../../store/useUiStore'
-import { BRANDS, PROFILES, PROFILE_LABEL, STAGES } from '../../domain/types'
-import type { Brand, DealInput, Profile, StageId } from '../../domain/types'
-import { fmtBRL, fmtDateTimeBR, normalizePhone, todayISO, waLink } from '../../domain/format'
-import { RECENCY_META, daysSince, recencyOf } from '../../domain/recency'
+import { PROFILES, PROFILE_LABEL, isProfile } from '../../domain/profile'
+import type { Profile } from '../../domain/profile'
+import type { ActivityType } from '../../domain/types'
+import { fmtBRL, fmtDateTimeBRMs, normalizePhone, waLink } from '../../domain/format'
+import { RECENCY_META, daysSinceMs, recencyOfMs } from '../../domain/recency'
 
 function parseBRLToCents(s: string): number {
   const clean = s.replace(/\./g, '').replace(',', '.').replace(/[^\d.]/g, '')
@@ -23,41 +26,97 @@ function parseBRLToCents(s: string): number {
   return Number.isFinite(n) ? Math.round(n * 100) : 0
 }
 
-const EMPTY: DealInput = {
-  stage: 'triage',
-  customerName: '',
+// Draft local do formulário: campos fixos atuais mapeados p/ v2
+// (custom por code + perfil no contato). Campos dinâmicos completos: Task 8.
+interface Draft {
+  stageId: string
+  name: string
+  phone: string
+  profile: Profile
+  brand: string
+  partCode: string
+  application: string
+  notes: string
+}
+
+const EMPTY: Draft = {
+  stageId: '',
+  name: '',
   phone: '',
   profile: 'bombista',
+  brand: 'Bosch',
   partCode: '',
   application: '',
-  brand: 'Bosch',
-  valueBRL: 0,
-  lastContactAt: todayISO(),
   notes: '',
+}
+
+const ACTIVITY_ICON: Partial<Record<ActivityType, typeof Plus>> = {
+  contact_logged: Phone,
+  stage_changed: ArrowRightLeft,
+  note: StickyNote,
+  task_created: CheckSquare,
+  task_done: CheckSquare,
+  tag_changed: Tag,
 }
 
 export default function DealDrawer() {
   const open = useUiStore((s) => s.drawerOpen)
   const dealId = useUiStore((s) => s.drawerDealId)
   const closeDrawer = useUiStore((s) => s.closeDrawer)
-  const deal = useCrmStore((s) => (dealId ? s.deals.find((d) => d.id === dealId) ?? null : null))
+  const data = useCrmStore((s) => s.data)
+  const view = useDealView(dealId)
+  const deal = view?.deal ?? null
   const addDeal = useCrmStore((s) => s.addDeal)
   const updateDeal = useCrmStore((s) => s.updateDeal)
   const removeDeal = useCrmStore((s) => s.removeDeal)
   const logContactToday = useCrmStore((s) => s.logContactToday)
   const moveDeal = useCrmStore((s) => s.moveDeal)
 
-  const [draft, setDraft] = useState<DealInput>(EMPTY)
+  const stages = useMemo(() => pipelineStages(data), [data])
+  const brands = useMemo(
+    () =>
+      (Object.values(data.customFields).find((f) => f.code === 'brand')?.enums ?? [])
+        .slice()
+        .sort((a, b) => a.sort - b.sort)
+        .map((e) => e.value),
+    [data.customFields],
+  )
+  const timeline = useMemo(
+    () =>
+      dealId
+        ? Object.values(data.activities)
+            .filter((a) => a.dealId === dealId)
+            .sort((a, b) => b.createdAt - a.createdAt)
+        : [],
+    [data.activities, dealId],
+  )
+
+  const [draft, setDraft] = useState<Draft>(EMPTY)
+  const [loaded, setLoaded] = useState<Draft>(EMPTY) // snapshot p/ enviar só campos de contato alterados
   const [valueStr, setValueStr] = useState('')
 
   useEffect(() => {
     if (!open) return
-    if (deal) {
-      const { stage, customerName, phone, profile, partCode, application, brand, valueBRL, lastContactAt, notes } = deal
-      setDraft({ stage, customerName, phone, profile, partCode, application, brand, valueBRL, lastContactAt, notes })
-      setValueStr((valueBRL / 100).toLocaleString('pt-BR'))
+    if (view) {
+      const { deal: d, contact } = view
+      const profile = contact?.custom['profile']
+      const initial: Draft = {
+        stageId: d.stageId,
+        name: d.name,
+        phone: contact?.phone ?? '',
+        profile: isProfile(profile) ? profile : 'cliente_final',
+        brand: String(d.custom['brand'] ?? ''),
+        partCode: String(d.custom['part_code'] ?? ''),
+        application: String(d.custom['application'] ?? ''),
+        notes: String(d.custom['notes'] ?? ''),
+      }
+      setDraft(initial)
+      setLoaded(initial)
+      setValueStr((d.priceCents / 100).toLocaleString('pt-BR'))
     } else {
-      setDraft(EMPTY)
+      const initial = { ...EMPTY, stageId: stages[0]?.id ?? '' }
+      setDraft(initial)
+      setLoaded(initial)
       setValueStr('')
     }
   }, [open, dealId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -71,33 +130,50 @@ export default function DealDrawer() {
   if (!open) return null
 
   const isNew = !deal
-  const patch = (p: Partial<DealInput>) => setDraft((d) => ({ ...d, ...p }))
+  const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }))
+
+  const toInput = (): DealInput2 => ({
+    name: draft.name.trim(),
+    phone: normalizePhone(draft.phone),
+    pipelineId: deal?.pipelineId ?? data.settings.defaultPipelineId,
+    stageId: draft.stageId,
+    priceCents: parseBRLToCents(valueStr),
+    custom: {
+      ...deal?.custom,
+      brand: draft.brand,
+      part_code: draft.partCode,
+      application: draft.application,
+      notes: draft.notes,
+    },
+    // contrato do store: só o que mudou (novo card sempre envia; addDeal só preenche vazios)
+    contactCustom: !deal || draft.profile !== loaded.profile ? { profile: draft.profile } : undefined,
+  })
 
   const save = () => {
-    const final = { ...draft, phone: normalizePhone(draft.phone), valueBRL: parseBRLToCents(valueStr) }
-    if (!final.customerName.trim()) return
-    if (isNew) addDeal(final)
-    else updateDeal(deal!.id, final)
+    if (!draft.name.trim()) return
+    if (isNew) addDeal(toInput())
+    else updateDeal(deal!.id, toInput())
     closeDrawer()
   }
 
-  const setStage = (to: StageId) => {
+  const setStage = (to: string) => {
     if (isNew || !deal) {
-      patch({ stage: to })
+      patch({ stageId: to })
       return
     }
-    updateDeal(deal.id, { ...draft, phone: normalizePhone(draft.phone), valueBRL: parseBRLToCents(valueStr) })
+    updateDeal(deal.id, toInput())
     moveDeal(deal.id, to)
-    patch({ stage: to })
+    patch({ stageId: to })
+    setLoaded({ ...draft, stageId: to }) // o draft já foi salvo: vira a nova base do "sujo"
   }
 
   const registrarHoje = () => {
-    patch({ lastContactAt: todayISO() })
     if (!isNew && deal) logContactToday(deal.id)
   }
 
-  const rec = recencyOf(draft.lastContactAt)
-  const days = daysSince(draft.lastContactAt)
+  const lastMs = view?.lastContactMs ?? Date.now()
+  const rec = recencyOfMs(lastMs)
+  const days = daysSinceMs(lastMs)
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -106,10 +182,10 @@ export default function DealDrawer() {
         <header className="flex items-center justify-between border-b border-line px-5 py-4">
           <div>
             <h2 className="text-[15px] font-extrabold tracking-tight">
-              {isNew ? 'Nova negociação' : deal?.customerName}
+              {isNew ? 'Nova negociação' : deal?.name}
             </h2>
             <p className="mt-0.5 font-mono text-[10.5px] uppercase tracking-widest text-ink-2">
-              {isNew ? 'card vazio' : `desde ${fmtDateTimeBR(deal!.createdAt)}`}
+              {isNew ? 'card vazio' : `desde ${fmtDateTimeBRMs(deal!.createdAt)}`}
             </p>
           </div>
           <button onClick={closeDrawer} className="rounded-lg p-2 text-ink-2 transition hover:bg-surface-2 hover:text-ink" aria-label="Fechar">
@@ -120,13 +196,13 @@ export default function DealDrawer() {
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <Field label="Etapa do funil">
             <select
-              value={draft.stage}
-              onChange={(e) => setStage(e.target.value as StageId)}
+              value={draft.stageId}
+              onChange={(e) => setStage(e.target.value)}
               className="w-full rounded-lg border border-line bg-bg px-3 py-2 text-[13px] outline-none focus:border-accent/60"
             >
-              {STAGES.map((s) => (
+              {stages.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.emoji} {s.label}
+                  {s.emoji} {s.name}
                 </option>
               ))}
             </select>
@@ -134,7 +210,7 @@ export default function DealDrawer() {
 
           <div className="grid grid-cols-2 gap-3">
             <Field label="Cliente / Empresa *">
-              <input value={draft.customerName} onChange={(e) => patch({ customerName: e.target.value })} className={inp} placeholder="Diesel Bomar Ltda" />
+              <input value={draft.name} onChange={(e) => patch({ name: e.target.value })} className={inp} placeholder="Diesel Bomar Ltda" />
             </Field>
             <Field label="Telefone / WhatsApp">
               <input value={draft.phone} onChange={(e) => patch({ phone: e.target.value })} className={inp} placeholder="81 99988-1122" />
@@ -150,8 +226,8 @@ export default function DealDrawer() {
               </select>
             </Field>
             <Field label="Marca">
-              <select value={draft.brand} onChange={(e) => patch({ brand: e.target.value as Brand })} className={inp}>
-                {BRANDS.map((b) => (
+              <select value={draft.brand} onChange={(e) => patch({ brand: e.target.value })} className={inp}>
+                {(brands.includes(draft.brand) || !draft.brand ? brands : [...brands, draft.brand]).map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
@@ -171,7 +247,7 @@ export default function DealDrawer() {
               <input value={valueStr} onChange={(e) => setValueStr(e.target.value)} className={`${inp} font-mono`} placeholder="3.200,00" inputMode="decimal" />
             </Field>
             <Field label="Último contato">
-              <input type="date" value={draft.lastContactAt} onChange={(e) => patch({ lastContactAt: e.target.value })} className={`${inp} font-mono`} />
+              <input value={isNew ? '—' : fmtDateTimeBRMs(lastMs)} readOnly className={`${inp} font-mono opacity-70`} title="Use “Contato hoje” para registrar" />
             </Field>
           </div>
 
@@ -186,21 +262,30 @@ export default function DealDrawer() {
             <textarea value={draft.notes} onChange={(e) => patch({ notes: e.target.value })} rows={3} className={`${inp} resize-none`} placeholder="Ex: pediu 4 unidades com bicos novos…" />
           </Field>
 
-          {!isNew && deal && deal.activityLog.length > 0 && (
+          {!isNew && timeline.length > 0 && (
             <div>
               <h3 className="mb-2 text-[11px] font-bold uppercase tracking-widest text-ink-2">Linha do tempo</h3>
               <ul className="space-y-1.5">
-                {[...deal.activityLog].reverse().map((a, i) => (
-                  <li key={i} className="flex items-start gap-2 text-[12px]">
-                    <span className="mt-0.5 text-ink-2">
-                      {a.type === 'contact' ? <Phone size={12} /> : a.type === 'stage' ? <ArrowRightLeft size={12} /> : a.type === 'note' ? <StickyNote size={12} /> : <Plus size={12} />}
-                    </span>
-                    <div>
-                      <p className="leading-snug">{a.text}</p>
-                      <p className="font-mono text-[10px] text-ink-2">{fmtDateTimeBR(a.at)}</p>
-                    </div>
-                  </li>
-                ))}
+                {timeline.map((a) => {
+                  const Icon = ACTIVITY_ICON[a.type] ?? Plus
+                  const diffs = a.type === 'field_changed' ? a.params : []
+                  return (
+                    <li key={a.id} className="flex items-start gap-2 text-[12px]">
+                      <span className="mt-0.5 text-ink-2">
+                        <Icon size={12} />
+                      </span>
+                      <div>
+                        <p className="leading-snug">{a.text}</p>
+                        {diffs.map((p, i) => (
+                          <p key={i} className="font-mono text-[10.5px] text-ink-2">
+                            {p.fieldId}: {String(p.oldValue ?? '') || '∅'} → {String(p.newValue ?? '') || '∅'}
+                          </p>
+                        ))}
+                        <p className="font-mono text-[10px] text-ink-2">{fmtDateTimeBRMs(a.createdAt)}</p>
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           )}
@@ -209,7 +294,7 @@ export default function DealDrawer() {
         <footer className="space-y-2 border-t border-line px-5 py-4">
           <div className="flex gap-2">
             <a
-              href={waLink(draft.phone || deal?.phone || '')}
+              href={waLink(draft.phone || view?.contact?.phone || '')}
               target="_blank"
               rel="noreferrer"
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-green-600/15 py-2.5 text-[12.5px] font-bold text-green-600 transition hover:bg-green-600/25 dark:text-green-400"
@@ -220,12 +305,12 @@ export default function DealDrawer() {
               onClick={registrarHoje}
               className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent/15 py-2.5 text-[12.5px] font-bold text-accent transition hover:bg-accent/25"
             >
-              <CalendarCheck1 size={14} /> Contato hoje
+              <CalendarCheck size={14} /> Contato hoje
             </button>
             {!isNew && (
               <button
                 onClick={() => {
-                  if (deal && confirm(`Excluir a negociação "${deal.customerName}"?`)) {
+                  if (deal && confirm(`Excluir a negociação "${deal.name}"?`)) {
                     removeDeal(deal.id)
                     closeDrawer()
                   }
@@ -239,7 +324,7 @@ export default function DealDrawer() {
           </div>
           <button
             onClick={save}
-            disabled={!draft.customerName.trim()}
+            disabled={!draft.name.trim()}
             className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent py-2.5 text-[13px] font-extrabold text-bg-deep shadow transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40 dark:text-[#161310]"
           >
             <Save size={15} /> {isNew ? 'Criar negociação' : 'Salvar alterações'}

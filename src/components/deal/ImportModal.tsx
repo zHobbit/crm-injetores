@@ -8,14 +8,14 @@ import { fmtPhone, normalizePhone } from '../../domain/format'
 export default function ImportModal() {
   const open = useUiStore((s) => s.importOpen)
   const setOpen = useUiStore((s) => s.setImportOpen)
-  const deals = useCrmStore((s) => s.deals)
+  const contacts = useCrmStore((s) => s.data.contacts)
   const importDeals = useCrmStore((s) => s.importDeals)
   const [text, setText] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const preview = useMemo(() => {
     if (!text.trim()) return []
-    const existing = new Set(deals.map((d) => normalizePhone(d.phone)).filter(Boolean))
+    const existing = new Set(Object.values(contacts).map((c) => normalizePhone(c.phone)).filter(Boolean))
     const seen = new Set<string>()
     return parseContacts(text).map((c) => {
       const digits = normalizePhone(c.phone)
@@ -23,7 +23,7 @@ export default function ImportModal() {
       if (digits && !dup) seen.add(digits)
       return { ...c, digits, dup }
     })
-  }, [text, deals])
+  }, [text, contacts])
 
   const newCount = preview.filter((p) => !p.dup).length
 

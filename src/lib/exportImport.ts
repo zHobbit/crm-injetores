@@ -1,17 +1,19 @@
 import { format } from 'date-fns'
-import type { Deal } from '../domain/types'
+import type { CrmData } from '../domain/types'
+import { coerceV1Deals, dealsV1ToCrmDataV2 } from '../domain/migration'
+import { hasV2Skeleton } from '../domain/sanitize'
 
 export interface Snapshot {
-  schemaVersion: 1
+  schemaVersion: 2
   exportedAt: string
-  deals: Deal[]
+  data: CrmData
 }
 
-export function exportJson(deals: Deal[]) {
+export function exportJson(data: CrmData) {
   const snapshot: Snapshot = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAt: new Date().toISOString(),
-    deals,
+    data,
   }
   const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
@@ -22,8 +24,20 @@ export function exportJson(deals: Deal[]) {
   URL.revokeObjectURL(url)
 }
 
-export async function importJson(file: File): Promise<Deal[]> {
-  const parsed = JSON.parse(await file.text()) as Partial<Snapshot>
-  if (!Array.isArray(parsed.deals)) throw new Error('Arquivo sem a lista "deals"')
-  return parsed.deals.filter((d) => d && typeof d.id === 'string' && typeof d.stage === 'string')
+/**
+ * Aceita snapshot v2 (`{ data }`) e v1 legado (`{ deals: DealV1[] }`, migrado na hora).
+ * Só valida o esqueleto: merge com o seed + saneamento ficam num único ponto (replaceAll).
+ */
+export function parseSnapshot(parsed: unknown): CrmData {
+  const p = parsed as { schemaVersion?: number; data?: CrmData; deals?: unknown } | null
+  if (p?.data && p.data.version === 2) {
+    if (!hasV2Skeleton(p.data)) throw new Error('Backup v2 sem etapas ou negociações')
+    return p.data
+  }
+  if (p && Array.isArray(p.deals)) return dealsV1ToCrmDataV2(coerceV1Deals(p.deals), Date.now())
+  throw new Error('Backup sem "data" v2 nem "deals" v1')
+}
+
+export async function importJson(file: File): Promise<CrmData> {
+  return parseSnapshot(JSON.parse(await file.text()))
 }

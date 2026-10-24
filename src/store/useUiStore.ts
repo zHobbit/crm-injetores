@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { Profile } from '../domain/types'
+import type { Profile } from '../domain/profile'
 import type { RecencyLevel } from '../domain/recency'
 
 interface UiState {

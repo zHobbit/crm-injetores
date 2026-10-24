@@ -2,8 +2,8 @@ import { Search, Plus, Upload, Menu, X } from 'lucide-react'
 import { useUiStore } from '../../store/useUiStore'
 import { useCrmStore } from '../../store/useCrmStore'
 import { exportJson } from '../../lib/exportImport'
-import { PROFILES, PROFILE_LABEL, PROFILE_CLASS } from '../../domain/types'
-import type { Profile } from '../../domain/types'
+import { PROFILES, PROFILE_LABEL, PROFILE_CLASS } from '../../domain/profile'
+import type { Profile } from '../../domain/profile'
 
 export default function Topbar({ onMenu }: { onMenu: () => void }) {
   const query = useUiStore((s) => s.query)
@@ -14,7 +14,7 @@ export default function Topbar({ onMenu }: { onMenu: () => void }) {
   const setRecencyFilter = useUiStore((s) => s.setRecencyFilter)
   const openDrawer = useUiStore((s) => s.openDrawer)
   const setImportOpen = useUiStore((s) => s.setImportOpen)
-  const deals = useCrmStore((s) => s.deals)
+  const data = useCrmStore((s) => s.data)
 
   const hasFilters = profileFilter !== 'all' || recencyFilter !== 'all' || query !== ''
 
@@ -70,7 +70,7 @@ export default function Topbar({ onMenu }: { onMenu: () => void }) {
 
       <div className="ml-auto flex items-center gap-2">
         <button
-          onClick={() => exportJson(deals)}
+          onClick={() => exportJson(data)}
           title="Exportar backup JSON"
           className="hidden rounded-lg border border-line p-2 text-ink-2 transition hover:bg-surface-2 hover:text-ink md:block"
         >
