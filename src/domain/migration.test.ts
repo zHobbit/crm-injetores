@@ -51,3 +51,12 @@ describe('isV1State', () => {
     expect(isV1State({ version: 2, deals: {} })).toBe(false)
   })
 })
+
+describe('coerceV1Deals', () => {
+  it('activityLog sem text vira texto vazio; perfil desconhecido vira cliente_final', async () => {
+    const { coerceV1Deals } = await import('./migration')
+    const [d] = coerceV1Deals([{ id: 'x', stage: 'triage', profile: 'alien', activityLog: [{ at: '2026-01-01', type: 'note' }] }])
+    expect(d.activityLog[0].text).toBe('')
+    expect(d.profile).toBe('cliente_final')
+  })
+})

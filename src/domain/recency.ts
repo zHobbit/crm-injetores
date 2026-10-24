@@ -34,3 +34,13 @@ export const RECENCY_META: Record<
     border: 'border-l-red-500',
   },
 }
+
+/** Variantes em ms epoch (schema v2: datas de domínio são ms). */
+export function daysSinceMs(ms: number, now: Date = new Date()): number {
+  return differenceInCalendarDays(startOfDay(now), startOfDay(new Date(ms)))
+}
+
+export function recencyOfMs(ms: number, now: Date = new Date()): RecencyLevel {
+  const d = daysSinceMs(ms, now)
+  return d < 7 ? 'green' : d <= 14 ? 'amber' : 'red'
+}

@@ -1,15 +1,13 @@
 import { useMemo, useRef } from 'react'
 import { Gauge, LayoutGrid, Upload, Download, FileJson, RotateCcw, Sun, Moon, X } from 'lucide-react'
-import { useCrmStore } from '../../store/useCrmStore'
+import { lastContactMsOf, preSaleStageIds, useCrmStore } from '../../store/useCrmStore'
 import { useUiStore } from '../../store/useUiStore'
 import { fmtBRL } from '../../domain/format'
-import { recencyOf } from '../../domain/recency'
+import { recencyOfMs } from '../../domain/recency'
 import { exportJson, importJson } from '../../lib/exportImport'
 
-const PRE_SALE = new Set(['triage', 'quote', 'waiting', 'negotiation'])
-
 export default function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const deals = useCrmStore((s) => s.deals)
+  const data = useCrmStore((s) => s.data)
   const resetSeed = useCrmStore((s) => s.resetSeed)
   const theme = useUiStore((s) => s.theme)
   const toggleTheme = useUiStore((s) => s.toggleTheme)
@@ -17,11 +15,13 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
   const restoreRef = useRef<HTMLInputElement>(null)
 
   const metrics = useMemo(() => {
-    const pipeline = deals.filter((d) => PRE_SALE.has(d.stage)).reduce((a, d) => a + d.valueBRL, 0)
-    const closed = deals.filter((d) => d.closedAt).reduce((a, d) => a + d.valueBRL, 0)
-    const followUps = deals.filter((d) => recencyOf(d.lastContactAt) !== 'green').length
+    const deals = Object.values(data.deals)
+    const preSale = preSaleStageIds(data)
+    const pipeline = deals.filter((d) => preSale.has(d.stageId)).reduce((a, d) => a + d.priceCents, 0)
+    const closed = deals.filter((d) => d.closedAt).reduce((a, d) => a + d.priceCents, 0)
+    const followUps = deals.filter((d) => recencyOfMs(lastContactMsOf(data, d.id)) !== 'green').length
     return { pipeline, closed, followUps, total: deals.length }
-  }, [deals])
+  }, [data])
 
   return (
     <>
@@ -55,7 +55,7 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
         <nav className="flex flex-col gap-1">
           <NavItem icon={<LayoutGrid size={16} />} label="Quadro de vendas" active />
           <NavItem icon={<Upload size={16} />} label="Importar contatos" onClick={() => { setImportOpen(true); onClose() }} />
-          <NavItem icon={<Download size={16} />} label="Backup (JSON)" onClick={() => exportJson(deals)} />
+          <NavItem icon={<Download size={16} />} label="Backup (JSON)" onClick={() => exportJson(data)} />
           <NavItem icon={<FileJson size={16} />} label="Restaurar backup" onClick={() => restoreRef.current?.click()} />
           <input
             ref={restoreRef}
@@ -68,7 +68,7 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
               if (!f) return
               try {
                 const restored = await importJson(f)
-                if (confirm(`Restaurar ${restored.length} negociação(s) do backup? Os dados atuais serão substituídos.`)) {
+                if (confirm(`Restaurar ${Object.keys(restored.deals).length} negociação(s) do backup? Os dados atuais serão substituídos.`)) {
                   useCrmStore.getState().replaceAll(restored)
                 }
               } catch {

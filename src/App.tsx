@@ -11,11 +11,12 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
-import { useCrmStore } from './store/useCrmStore'
+import { lastContactMsOf, useCrmStore } from './store/useCrmStore'
 import { useUiStore } from './store/useUiStore'
 import { normalizePhone } from './domain/format'
-import { recencyOf } from './domain/recency'
-import type { Deal, StageId } from './domain/types'
+import { recencyOfMs } from './domain/recency'
+import { profileOf } from './domain/profile'
+import type { Deal } from './domain/types'
 import Sidebar from './components/layout/Sidebar'
 import Topbar from './components/layout/Topbar'
 import Board from './components/kanban/Board'
@@ -24,7 +25,8 @@ import DealDrawer from './components/deal/DealDrawer'
 import ImportModal from './components/deal/ImportModal'
 
 export default function App() {
-  const deals = useCrmStore((s) => s.deals)
+  const data = useCrmStore((s) => s.data)
+  const deals = useMemo(() => Object.values(data.deals), [data.deals])
   const moveDeal = useCrmStore((s) => s.moveDeal)
   const theme = useUiStore((s) => s.theme)
   const query = useUiStore((s) => s.query)
@@ -41,18 +43,19 @@ export default function App() {
     const q = query.trim().toLowerCase()
     const qDigits = normalizePhone(q)
     return deals.filter((d) => {
-      if (profileFilter !== 'all' && d.profile !== profileFilter) return false
-      if (recencyFilter !== 'all' && recencyOf(d.lastContactAt) !== recencyFilter) return false
+      const contact = d.contactId ? data.contacts[d.contactId] : undefined
+      if (profileFilter !== 'all' && profileOf(contact) !== profileFilter) return false
+      if (recencyFilter !== 'all' && recencyOfMs(lastContactMsOf(data, d.id)) !== recencyFilter) return false
       if (!q) return true
-      const digits = d.phone.replace(/\D/g, '')
+      const digits = (contact?.phone ?? '').replace(/\D/g, '')
       return (
-        d.customerName.toLowerCase().includes(q) ||
-        d.partCode.toLowerCase().includes(q) ||
-        d.application.toLowerCase().includes(q) ||
+        d.name.toLowerCase().includes(q) ||
+        String(d.custom['part_code'] ?? '').toLowerCase().includes(q) ||
+        String(d.custom['application'] ?? '').toLowerCase().includes(q) ||
         (qDigits.length >= 6 && digits.includes(qDigits))
       )
     })
-  }, [deals, query, profileFilter, recencyFilter])
+  }, [deals, data, query, profileFilter, recencyFilter])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -74,13 +77,8 @@ export default function App() {
     const activeDeal = deals.find((d) => d.id === activeId)
     if (!activeDeal) return
 
-    let toStage: StageId
-    if (overDeal) toStage = overDeal.stage
-    else toStage = overId as StageId
-
-    if (!overDeal && activeDeal.stage === toStage) {
-      // soltou na própria coluna: moveDeal mantém posição relativa
-    }
+    const toStage = overDeal ? overDeal.stageId : overId
+    if (!data.stages[toStage]) return
 
     moveDeal(activeId, toStage, overDeal?.id)
   }

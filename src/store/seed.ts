@@ -411,6 +411,25 @@ const toActivity = (
   authorName: 'me',
 })
 
+/**
+ * v2 não tem Deal.lastContactAt: a recência deriva da última Activity
+ * contact_logged. Este helper converte o lastContactAt (yyyy-MM-dd) do v1
+ * numa Activity sintética (meio-dia local, evita virar o dia em UTC).
+ */
+export const lastContactActivityV1 = (v1: DealV1): Activity | null => {
+  const ms = Date.parse(`${v1.lastContactAt}T12:00:00`)
+  if (Number.isNaN(ms)) return null
+  return {
+    id: `act-${v1.id}-lc`,
+    dealId: v1.id,
+    type: 'contact_logged',
+    text: 'Último contato (migrado do v1)',
+    params: [],
+    createdAt: ms,
+    authorName: 'me',
+  }
+}
+
 // ---------- seedCrmData ----------
 export function seedCrmData(): CrmData {
   const contacts: CrmData['contacts'] = {}
@@ -457,6 +476,8 @@ export function seedCrmData(): CrmData {
       const act = toActivity(v1.id, idx, item)
       activities[act.id] = act
     })
+    const lc = lastContactActivityV1(v1)
+    if (lc) activities[lc.id] = lc
   }
 
   return {
