@@ -196,7 +196,7 @@ export interface AutomationRule {
 export type TriggerEvent =
   | { kind: 'deal_created' }
   | { kind: 'stage_changed'; toStageId?: string }
-  | { kind: 'tag_changed'; action: 'added' | 'removed' }
+  | { kind: 'tag_changed'; action: 'added' | 'removed'; tag?: string } // sem tag = qualquer tag
   | { kind: 'field_changed'; fieldCode: string }
   | { kind: 'days_no_contact'; days: number } // roda no tick diário
   | { kind: 'task_overdue' }
@@ -205,7 +205,8 @@ export type Condition =
   | { field: 'stage'; op: 'in'; value: string[] }
   | { field: 'source'; op: 'in'; value: string[] }
   | { field: 'profile'; op: 'is' | 'is_not'; value: string }
-  | { field: 'price'; op: 'gt' | 'lt' | 'between'; value: number }
+  | { field: 'price'; op: 'gt' | 'lt'; value: number } // centavos
+  | { field: 'price'; op: 'between'; value: [number, number] } // [mín, máx] inclusivo, centavos
   | { field: 'custom'; fieldCode: string; op: 'filled' | 'not_filled' | 'eq' | 'contains'; value?: string }
   | { field: 'has_tag'; op: 'has' | 'has_not'; value: string }
 
