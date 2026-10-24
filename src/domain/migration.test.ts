@@ -30,7 +30,7 @@ describe('dealsV1ToCrmDataV2', () => {
   })
   it('closedAt ISO vira ms; won ganha closedAt', () => {
     const won = data.deals['seed-8']
-    expect(won.closedAt).toBe(Date.parse('2026-10-17'))  // atualizar p/ valor real do fixture
+    expect(won.closedAt).toBe(Date.parse('2026-10-17'))
     expect(won.stageId).toBe('won')
   })
   it('chassi migrado expõe o schema do Addendum (Stage.kind, requiredInStageIds)', () => {

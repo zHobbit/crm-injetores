@@ -33,9 +33,8 @@ describe('schema v2', () => {
     }
     expect(d.currency).toBe('BRL')
   })
-  it('CrmData expõe as 12 coleções', () => {
+  it('CrmData tem as 15 chaves v2 (compilação é o teste)', () => {
     const keys: (keyof CrmData)[] = ['version','pipelines','stages','customFields','catalogs','catalogElements','contacts','companies','deals','tasks','activities','lossReasons','sources','settings','automations']
-    const empty = { } as CrmData
-    for (const k of keys) expect(k in empty || true).toBe(true)
+    expect(keys).toHaveLength(15)
   })
 })

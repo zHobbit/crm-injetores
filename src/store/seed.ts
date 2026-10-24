@@ -24,9 +24,12 @@ const PIPE_MAIN = 'pipe-main'
 const iso = (daysAgo: number) => format(subDays(new Date(), daysAgo), 'yyyy-MM-dd')
 const ts = (daysAgo: number) => subDays(new Date(), daysAgo).toISOString()
 
+// união única de ids de etapa do seed — valida base() e STAGE_SEED contra a mesma fonte
+type SeedStageId = 'triage' | 'quote' | 'waiting' | 'negotiation' | 'won' | 'postsale' | 'warranty'
+
 // ---------- negócios v1 (fonte: seed antigo, conteúdo preservado verbatim) ----------
 let seq = 0
-const base = (stage: DealV1['stage'], order: number) => ({
+const base = (stage: SeedStageId, order: number) => ({
   id: `seed-${++seq}`,
   stage,
   order,
@@ -185,7 +188,7 @@ const pipelines: Record<string, Pipeline> = {
 }
 
 // Espelho do STAGES v1 (id, label, accent, emoji) — Addendum A1: won → 'won', demais 'open'.
-const STAGE_SEED: { id: string; name: string; color: string; emoji: string; kind: Stage['kind'] }[] = [
+const STAGE_SEED: { id: SeedStageId; name: string; color: string; emoji: string; kind: Stage['kind'] }[] = [
   { id: 'triage', name: 'Triagem / Novo Contato', color: '#94a3b8', emoji: '📥', kind: 'open' },
   { id: 'quote', name: 'Cotação Enviada', color: '#38bdf8', emoji: '📋', kind: 'open' },
   { id: 'waiting', name: 'Aguardando Resposta', color: '#fbbf24', emoji: '⏳', kind: 'open' },
@@ -475,8 +478,8 @@ export function seedCrmData(): CrmData {
       currency: 'BRL',
       timezone: 'America/Sao_Paulo',
     },
-    // cópia defensiva: engine grava lastFiredAt nas regras; resetSeed() precisa
-    // devolver estado limpo sem vazar cooldowns entre instâncias
+    // cópia defensiva RASA: isola lastFiredAt (único campo que o engine T5 escreve);
+    // trigger/conditions/actions seguem por referência — editar regras in-place exige cópia profunda
     automations: SEED_AUTOMATIONS.map((r) => ({ ...r, lastFiredAt: {} })),
   }
 }
