@@ -1,6 +1,15 @@
 import { localStorageMock } from '../test/localStorage.mock'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { crmStorage, lastContactMsOf, persistMigrate, useCrmStore, type DealInput2 } from './useCrmStore'
+import {
+  crmStorage,
+  lastContactMsOf,
+  persistMigrate,
+  runAutomationTick,
+  useCrmStore,
+  type DealInput2,
+} from './useCrmStore'
+import { endOfDay } from 'date-fns'
+import type { AutomationRule } from '../domain/types'
 import { seedCrmData } from './seed'
 import { SEED_DEALS_V1 } from '../domain/migrationFixtures'
 import { fmtBRL, msDay } from '../domain/format'
@@ -24,7 +33,8 @@ const input = (p: Partial<DealInput2> = {}): DealInput2 => ({
 })
 
 beforeEach(() => {
-  useCrmStore.setState({ data: seedCrmData() })
+  // testes unitários do store rodam sem automações; os de integração ligam as do seed
+  useCrmStore.setState({ data: { ...seedCrmData(), automations: [] } })
   crmStorage.flush() // gravação agrupada: zera pendência entre testes
   localStorageMock.clear()
 })
@@ -680,5 +690,172 @@ describe('persist com gravação agrupada', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('automações ligadas ao store (Task 6)', () => {
+  const withSeedRules = (rules = seedCrmData().automations) =>
+    useCrmStore.setState((s) => ({ data: { ...s.data, automations: rules } }))
+  const tasksOf = (dealId: string) => Object.values(st().data.tasks).filter((t) => t.dealId === dealId)
+  const typesOf = (dealId: string) => actsOf(dealId).map((a) => a.type)
+
+  it('moveDeal → quote: tarefa "cobrar cotação" em 3 dias + tag aguardando + atividades', () => {
+    withSeedRules()
+    const id = st().addDeal(input())
+    st().moveDeal(id, 'quote')
+    const [task] = tasksOf(id)
+    expect(task).toMatchObject({ text: 'cobrar cotação', kind: 'acompanhar', completed: false })
+    expect(task.dueAt).toBe(endOfDay(Date.now() + 3 * msDay).getTime())
+    expect(st().data.deals[id].tags).toContain('aguardando')
+    expect(typesOf(id)).toEqual(expect.arrayContaining(['stage_changed', 'task_created', 'tag_changed']))
+    expect(st().data.automations.find((r) => r.id === 'auto-2')!.lastFiredAt![id]).toBeGreaterThan(0)
+  })
+
+  it('voltar para quote dentro do cooldown não recria a tarefa', () => {
+    withSeedRules()
+    const id = st().addDeal(input())
+    st().moveDeal(id, 'quote')
+    st().moveDeal(id, 'waiting')
+    st().moveDeal(id, 'quote')
+    expect(tasksOf(id).filter((t) => t.text === 'cobrar cotação')).toHaveLength(1)
+  })
+
+  it('addDeal de revendedor → tarefa "montar tabela de revenda"', () => {
+    withSeedRules()
+    const id = st().addDeal(input({ contactCustom: { profile: 'revendedor' } }))
+    expect(tasksOf(id).map((t) => t.text)).toEqual(['montar tabela de revenda'])
+  })
+
+  it('tag retorno-antecipado → move para garantia + tarefa de bancada', () => {
+    withSeedRules()
+    const id = st().addDeal(input({ stageId: 'postsale' }))
+    st().addTag(id, 'retorno-antecipado')
+    expect(st().data.deals[id].stageId).toBe('warranty')
+    expect(tasksOf(id).map((t) => t.text)).toEqual(['análise de bancada'])
+  })
+
+  it('won → cria negócio de pós-venda (mesmo contato) sem disparar regras de criação nele', () => {
+    withSeedRules()
+    const id = st().addDeal(input({ contactCustom: { profile: 'revendedor' } }))
+    const before = Object.keys(st().data.deals).length
+    st().moveDeal(id, 'won')
+    const deals = Object.values(st().data.deals)
+    expect(deals).toHaveLength(before + 1)
+    const post = deals.find((d) => d.name === 'Oficina Teste — pós-venda')!
+    expect(post).toMatchObject({ stageId: 'postsale', contactId: st().data.deals[id].contactId, priceCents: 0 })
+    expect(post.custom['part_code']).toBe('0445110376')
+    expect(tasksOf(id).map((t) => t.text)).toContain('enviar certificado de teste')
+    expect(tasksOf(post.id)).toEqual([]) // sem cascata: deal_created do pós-venda não roda a regra 1
+  })
+
+  it('sem cascata: ações do motor não disparam novas automações (ping-pong termina)', () => {
+    const ping: AutomationRule = {
+      id: 'ping', name: 'ping', enabled: true, dealPipelineId: 'any',
+      trigger: { kind: 'stage_changed', toStageId: 'quote' }, conditions: { logic: 'and', items: [] },
+      actions: [{ kind: 'change_stage', toStageId: 'waiting' }],
+    }
+    const pong: AutomationRule = {
+      ...ping, id: 'pong', trigger: { kind: 'stage_changed', toStageId: 'waiting' },
+      actions: [{ kind: 'change_stage', toStageId: 'quote' }],
+    }
+    withSeedRules([ping, pong])
+    const id = st().addDeal(input())
+    st().moveDeal(id, 'quote')
+    expect(st().data.deals[id].stageId).toBe('waiting') // ping rodou; pong não (evento gerado pelo motor)
+  })
+
+  it('setField e updateDeal emitem field_changed; sem mudança não emite', () => {
+    const rule: AutomationRule = {
+      id: 'f', name: 'f', enabled: true, dealPipelineId: 'any',
+      trigger: { kind: 'field_changed', fieldCode: 'brand' }, conditions: { logic: 'and', items: [] },
+      actions: [{ kind: 'add_note', text: 'marca mudou' }],
+    }
+    withSeedRules([rule])
+    const id = st().addDeal(input())
+    st().setField(id, 'brand', 'Delphi')
+    st().updateDeal(id, { custom: { brand: 'Denso' } })
+    st().setField(id, 'brand', 'Denso')
+    expect(actsOf(id).filter((a) => a.type === 'note' && a.text === 'marca mudou')).toHaveLength(2)
+  })
+
+  it('perfil alterado no contato emite field_changed com o code do campo', () => {
+    const rule: AutomationRule = {
+      id: 'p', name: 'p', enabled: true, dealPipelineId: 'any',
+      trigger: { kind: 'field_changed', fieldCode: 'profile' }, conditions: { logic: 'and', items: [] },
+      actions: [{ kind: 'add_tag', tag: 'perfil-mudou' }],
+    }
+    withSeedRules([rule])
+    const id = st().addDeal(input())
+    st().updateDeal(id, { contactCustom: { profile: 'revendedor' } })
+    expect(st().data.deals[id].tags).toEqual(['perfil-mudou'])
+  })
+
+  it('regra desabilitada não faz nada', () => {
+    withSeedRules(seedCrmData().automations.map((r) => ({ ...r, enabled: false })))
+    const id = st().addDeal(input())
+    st().moveDeal(id, 'quote')
+    expect(tasksOf(id)).toEqual([])
+  })
+
+  it('erro numa ação do motor não quebra a ação do usuário', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const bad: AutomationRule = {
+      id: 'bad', name: 'bad', enabled: true, dealPipelineId: 'any',
+      trigger: { kind: 'stage_changed', toStageId: 'quote' }, conditions: { logic: 'and', items: [] },
+      actions: [{ kind: 'create_deal', template: 'posvenda', atStageId: 'etapa-inexistente' }],
+    }
+    withSeedRules([bad])
+    const id = st().addDeal(input())
+    expect(() => st().moveDeal(id, 'quote')).not.toThrow()
+    expect(st().data.deals[id].stageId).toBe('quote')
+    err.mockRestore()
+  })
+
+  it('tick: 8 dias sem contato em waiting → tarefa + nota de WhatsApp; 2º tick não duplica', () => {
+    withSeedRules()
+    const id = st().addDeal(input({ stageId: 'waiting' }))
+    useCrmStore.setState((s) => ({
+      data: { ...s.data, deals: { ...s.data.deals, [id]: { ...s.data.deals[id], createdAt: Date.now() - 8 * msDay } } },
+    }))
+    runAutomationTick()
+    runAutomationTick()
+    expect(tasksOf(id).filter((t) => t.text.startsWith('Follow-up WhatsApp'))).toHaveLength(1)
+    expect(actsOf(id).some((a) => a.type === 'note' && a.text.startsWith('Follow-up WhatsApp'))).toBe(true)
+  })
+
+  it('regras salvas pela 0.2.0 são atualizadas (auto-6 ganha filtro de tag, auto-2 ganha cooldown)', () => {
+    const data = seedCrmData()
+    const old = data.automations.map((r) => {
+      if (r.id === 'auto-6') return { ...r, trigger: { kind: 'tag_changed' as const, action: 'added' as const } }
+      if (r.id === 'auto-2') return { ...r, cooldown: undefined }
+      return r
+    })
+    const out = persistMigrate({ data: { ...data, automations: old } }, 2)
+    expect(out.data.automations.find((r) => r.id === 'auto-6')!.trigger).toEqual({
+      kind: 'tag_changed', action: 'added', tag: 'retorno-antecipado',
+    })
+    expect(out.data.automations.find((r) => r.id === 'auto-2')!.cooldown).toBe(86400)
+  })
+
+  it('regra editada pelo usuário não é sobrescrita pela atualização', () => {
+    const data = seedCrmData()
+    const custom = data.automations.map((r) =>
+      r.id === 'auto-6'
+        ? { ...r, trigger: { kind: 'tag_changed' as const, action: 'added' as const }, actions: [{ kind: 'add_note' as const, text: 'meu' }] }
+        : r,
+    )
+    const out = persistMigrate({ data: { ...data, automations: custom } }, 2)
+    expect(out.data.automations.find((r) => r.id === 'auto-6')!.trigger).toEqual({ kind: 'tag_changed', action: 'added' })
+  })
+})
+
+describe('removeDeal limpa o histórico de disparo', () => {
+  it('lastFiredAt do deal excluído sai de todas as regras', () => {
+    useCrmStore.setState((s) => ({ data: { ...s.data, automations: seedCrmData().automations } }))
+    const id = st().addDeal(input())
+    st().moveDeal(id, 'quote')
+    expect(st().data.automations.some((r) => r.lastFiredAt && id in r.lastFiredAt)).toBe(true)
+    st().removeDeal(id)
+    expect(st().data.automations.some((r) => r.lastFiredAt && id in r.lastFiredAt)).toBe(false)
   })
 })

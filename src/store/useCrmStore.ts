@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type {
@@ -25,7 +25,17 @@ import {
   resetDealInIndex,
 } from '../domain/indexes'
 import { bindFlushOnExit, createThrottledJSONStorage } from '../lib/throttledStorage'
-import { seedCrmData } from './seed'
+import { seedCrmData, upgradeSeedAutomations } from './seed'
+import {
+  applyFiredActions,
+  evaluateRules,
+  evaluateTick,
+  markFired,
+  type EngineApi,
+  type EngineCtx,
+  type EngineEvent,
+  type FiredAction,
+} from '../domain/automationEngine'
 
 type FieldValue = string | number | string[] | null
 
@@ -63,6 +73,8 @@ interface CrmState {
   removeStage: (id: string) => void
   upsertCustomField: (field: CustomField) => void
   upsertAutomation: (rule: AutomationRule) => void
+  /** Ação de automação `create_deal`: novo negócio derivado (pós-venda/garantia) do mesmo contato. */
+  createDealFromTemplate: (template: 'posvenda' | 'garantia', atStageId: string, sourceDealId: string) => string | null
 }
 
 export const PERSIST_KEY = 'crm.deals.v1' // NÃO renomear: descartaria os dados salvos
@@ -193,7 +205,10 @@ export function buildDealView(data: CrmData, id: string): DealView | null {
 }
 
 /** Mescla dados persistidos/restaurados com o seed e saneia (reparando) o resultado. */
-const withSeedDefaults = (data: Partial<CrmData>): CrmData => sanitizeCrmData(mergeWithSeed(data, seedCrmData()))
+const withSeedDefaults = (data: Partial<CrmData>): CrmData => {
+  const clean = sanitizeCrmData(mergeWithSeed(data, seedCrmData()))
+  return { ...clean, automations: upgradeSeedAutomations(clean.automations) }
+}
 
 /**
  * `migrate` do persist (exportado p/ teste). v1 (`{ deals: DealV1[] }`) →
@@ -246,7 +261,7 @@ export const useCrmStore = create<CrmState>()(
           return { data: withActivities({ ...s.data, deals: { ...s.data.deals, [id]: next } }, res.acts) }
         })
 
-      return {
+      const base: CrmState = {
         data: seedCrmData(),
 
         addDeal: (input) => {
@@ -431,7 +446,13 @@ export const useCrmStore = create<CrmState>()(
             // contato órfão sairia do quadro mas seguiria bloqueando import/dedupe por telefone
             const orphan = contactId && !Object.values(deals).some((d) => d.contactId === contactId)
             const contacts = orphan ? withoutContact(s.data.contacts, contactId) : s.data.contacts
-            return { data: { ...s.data, deals, contacts, tasks, activities } }
+            // histórico de disparo das regras não guarda deal que não existe mais
+            const automations = s.data.automations.map((r) => {
+              if (!r.lastFiredAt || !(id in r.lastFiredAt)) return r
+              const { [id]: _gone, ...lastFiredAt } = r.lastFiredAt
+              return { ...r, lastFiredAt }
+            })
+            return { data: { ...s.data, deals, contacts, tasks, activities, automations } }
           }),
 
         moveDeal: (id, toStageId, overId) =>
@@ -652,7 +673,48 @@ export const useCrmStore = create<CrmState>()(
               : [...s.data.automations, rule]
             return { data: { ...s.data, automations } }
           }),
+
+        createDealFromTemplate: (template, atStageId, sourceDealId) => {
+          const { data } = get()
+          const src = data.deals[sourceDealId]
+          const stage = data.stages[atStageId]
+          if (!src || !stage) return null
+          const id = uid()
+          const now = Date.now()
+          const label = template === 'posvenda' ? 'pós-venda' : 'garantia'
+          const name = `${src.name} — ${label}`
+          const inherited = Object.fromEntries(
+            ['part_code', 'application', 'brand'].filter((k) => k in src.custom).map((k) => [k, src.custom[k]]),
+          )
+          set((s) => {
+            const deal: Deal = {
+              id,
+              pipelineId: stage.pipelineId,
+              stageId: atStageId,
+              unsorted: false,
+              name,
+              contactId: src.contactId,
+              companyId: src.companyId,
+              order: columnIds(s.data.deals, atStageId).length,
+              priceCents: 0,
+              sourceId: src.sourceId,
+              lossReasonId: null,
+              currency: 'BRL',
+              closedAt: isClosedStage(s.data, atStageId) ? now : null,
+              custom: { ...inherited, notes: `Gerado por automação a partir de "${src.name}".` },
+              tags: [],
+              createdAt: now,
+              updatedAt: now,
+              createdBy: 'me',
+              updatedBy: 'me',
+            }
+            const act = makeActivity(id, 'deal_created', `Criado por automação (${label})`, [param('name', 'text', '', name)], now)
+            return { data: withActivities({ ...s.data, deals: { ...s.data.deals, [id]: deal } }, [act]) }
+          })
+          return id
+        },
       }
+      return withAutomationEvents(base, get)
     },
     {
       name: PERSIST_KEY,
@@ -664,6 +726,163 @@ export const useCrmStore = create<CrmState>()(
     },
   ),
 )
+
+// ---------- automações (motor ↔ store) ----------
+// Ações que geram eventos são envolvidas por withAutomationEvents (compara antes/depois)
+// e o motor roda após a mutação. SEM CASCATA: enquanto o motor executa ações, os eventos
+// que elas geram são ignorados (trava `running`) — evita loops entre regras e efeitos como
+// a tag posta por uma regra reavaliar regras de tag.
+
+let running = false
+
+const engineCtx = (data: CrmData, now: number): EngineCtx => ({
+  data,
+  now,
+  lastContactMs: (dealId) => lastContactMsOf(data, dealId),
+})
+
+const engineApi = (): EngineApi => {
+  const s = useCrmStore.getState()
+  return {
+    createTask: s.createTask,
+    moveDeal: (id, to) => s.moveDeal(id, to),
+    setField: s.setField,
+    addTag: s.addTag,
+    removeTag: s.removeTag,
+    addNote: s.addNote,
+    createDealFromTemplate: s.createDealFromTemplate,
+  }
+}
+
+/** Grava lastFiredAt e executa as ações; erro numa regra não derruba a ação do usuário. */
+const commitFired = (fired: FiredAction[], now: number) => {
+  if (fired.length === 0) return
+  useCrmStore.setState((s) => ({ data: { ...s.data, automations: markFired(s.data.automations, fired, now) } }))
+  try {
+    applyFiredActions(fired, engineApi(), now)
+  } catch (e) {
+    console.error('[crm] falha ao executar automação', e)
+  }
+}
+
+/** Avalia e executa as regras de um evento de negócio. No-op se já houver automação em curso. */
+export function runAutomations(event: EngineEvent): void {
+  if (running) return
+  running = true
+  try {
+    const now = Date.now()
+    commitFired(evaluateRules(engineCtx(useCrmStore.getState().data, now), event), now)
+  } finally {
+    running = false
+  }
+}
+
+/** Avalia e executa as regras de tempo (dias sem contato, tarefa atrasada). Devolve nº de ações. */
+export function runAutomationTick(now = Date.now()): number {
+  if (running) return 0
+  running = true
+  try {
+    const fired = evaluateTick(engineCtx(useCrmStore.getState().data, now))
+    commitFired(fired, now)
+    return fired.length
+  } finally {
+    running = false
+  }
+}
+
+/** Diferenças de campos customizados (deal e contato) viram eventos field_changed. */
+const emitFieldChanges = (before: CrmData, after: CrmData, dealId: string) => {
+  const diff = (a: Record<string, FieldValue> = {}, b: Record<string, FieldValue> = {}) =>
+    [...new Set([...Object.keys(a), ...Object.keys(b)])]
+      .filter((k) => !sameValue(a[k], b[k]))
+      .map((k) => [k, a[k], b[k]] as const)
+  const contactOf = (d: CrmData) => {
+    const cid = d.deals[dealId]?.contactId
+    return cid ? d.contacts[cid] : undefined
+  }
+  const changes = [
+    ...diff(before.deals[dealId]?.custom, after.deals[dealId]?.custom),
+    ...diff(contactOf(before)?.custom, contactOf(after)?.custom),
+  ]
+  for (const [fieldCode, oldV, newV] of changes) {
+    runAutomations({ kind: 'field_changed', dealId, at: Date.now(), fieldCode, oldValue: str(oldV), newValue: str(newV) })
+  }
+}
+
+function withAutomationEvents(base: CrmState, get: () => CrmState): CrmState {
+  const at = () => Date.now()
+  const createdSince = (before: CrmData) => Object.keys(get().data.deals).filter((id) => !(id in before.deals))
+  return {
+    ...base,
+    addDeal: (input) => {
+      const id = base.addDeal(input)
+      runAutomations({ kind: 'deal_created', dealId: id, at: at() })
+      return id
+    },
+    importDeals: (items) => {
+      const before = get().data
+      const added = base.importDeals(items)
+      for (const id of createdSince(before)) runAutomations({ kind: 'deal_created', dealId: id, at: at() })
+      return added
+    },
+    createDealFromTemplate: (template, atStageId, sourceDealId) => {
+      const id = base.createDealFromTemplate(template, atStageId, sourceDealId)
+      if (id) runAutomations({ kind: 'deal_created', dealId: id, at: at() })
+      return id
+    },
+    moveDeal: (id, toStageId, overId) => {
+      const from = get().data.deals[id]?.stageId
+      base.moveDeal(id, toStageId, overId)
+      const to = get().data.deals[id]?.stageId
+      if (from && to && from !== to) {
+        runAutomations({ kind: 'stage_changed', dealId: id, at: at(), oldValue: from, newValue: to })
+      }
+    },
+    updateDeal: (id, patch) => {
+      const before = get().data
+      base.updateDeal(id, patch)
+      emitFieldChanges(before, get().data, id)
+    },
+    setField: (id, code, value) => {
+      const before = get().data
+      base.setField(id, code, value)
+      emitFieldChanges(before, get().data, id)
+    },
+    addTag: (id, tag) => {
+      const had = get().data.deals[id]?.tags.includes(tag)
+      base.addTag(id, tag)
+      if (!had && get().data.deals[id]?.tags.includes(tag)) {
+        runAutomations({ kind: 'tag_changed', dealId: id, at: at(), oldValue: '', newValue: tag })
+      }
+    },
+    removeTag: (id, tag) => {
+      const had = get().data.deals[id]?.tags.includes(tag)
+      base.removeTag(id, tag)
+      if (had && !get().data.deals[id]?.tags.includes(tag)) {
+        runAutomations({ kind: 'tag_changed', dealId: id, at: at(), oldValue: tag, newValue: '' })
+      }
+    },
+  }
+}
+
+/**
+ * Tick das regras de tempo: ao montar, a cada `intervalMs` e ao voltar para a aba — só com a
+ * página visível. Ticks extras são inofensivos (cooldown/episódio evitam duplicar ações).
+ */
+export function useAutomationTick(intervalMs = 60 * 60 * 1000) {
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'visible') runAutomationTick()
+    }
+    tick()
+    const timer = setInterval(tick, intervalMs)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [intervalMs])
+}
 
 /** Visão derivada de um deal p/ UI (memoizada sobre `data`; selector estável). */
 export function useDealView(id: string | null): DealView | null {
