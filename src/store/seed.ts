@@ -373,7 +373,7 @@ export const SEED_AUTOMATIONS: AutomationRule[] = [
     name: 'Retorno antecipado → garantia',
     enabled: true,
     dealPipelineId: 'any',
-    trigger: { kind: 'tag_changed', action: 'added' },
+    trigger: { kind: 'tag_changed', action: 'added', tag: 'retorno-antecipado' },
     conditions: {
       logic: 'and',
       items: [{ field: 'has_tag', op: 'has', value: 'retorno-antecipado' }],
